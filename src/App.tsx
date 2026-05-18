@@ -490,7 +490,12 @@ export default function App() {
         }
 
         const query = params.toString();
-        const response = await fetch(`/api/sheets/city-progress${query ? `?${query}` : ''}`, { cache: 'no-store' });
+        
+        const baseUrl = typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+  ? '' 
+  : 'https://web4-jobs1.vercel.app'; // الرابط د الموقع ديالك أونلاين
+
+const response = await fetch(`${baseUrl}/api/sheets/city-progress${query ? `?${query}` : ''}`, { cache: 'no-store' });
         const data = await response.json() as { cities?: CityProgress[]; code?: string };
 
         if (!response.ok) {
