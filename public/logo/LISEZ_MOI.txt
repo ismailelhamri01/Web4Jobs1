@@ -1,0 +1,12 @@
+Dossier pour votre logo
+=======================
+
+C'est ici que vous pouvez importer votre propre fichier de logo (par exemple : logo.png, logo.jpg, ou logo.svg).
+
+COMMENT FAIRE :
+1. Utilisez l'explorateur de fichiers sur la gauche pour importer votre image dans ce dossier `public/logo/`.
+2. Ouvrez le fichier `src/components/Logo.tsx`.
+3. Remplacez le code SVG actuel par une balise image qui pointe vers votre nouveau fichier.
+
+Exemple si vous avez importé "mon-logo.png" :
+<img src="/logo/mon-logo.png" alt="Logo" className={className} />

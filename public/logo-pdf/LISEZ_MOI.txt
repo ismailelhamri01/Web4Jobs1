@@ -1,0 +1,11 @@
+Dossier pour le logo du Rapport PDF
+===================================
+
+C'est ici que vous pouvez placer le logo qui apparaîtra spécifiquement sur les rapports PDF téléchargés.
+
+COMMENT FAIRE :
+1. Utilisez l'explorateur de fichiers à gauche pour importer votre image dans ce dossier `public/logo-pdf/`.
+2. Renommez impérativement votre image en `logo.png` (ou modifiez l'extension si c'est un jpg).
+3. C'est tout ! Le générateur de PDF utilisera automatiquement cette image.
+
+Note : Si aucune image `logo.png` n'est trouvée dans ce dossier, le système utilisera le logo principal de l'application par défaut.
