@@ -33,8 +33,19 @@ const parsePercentageValue = (value: unknown): number | null => {
 };
 
 // 🔥 دالة جديدة لجلب أسماء كل التبويبات (Tabs) واختيار أحدث واحد تلقائياً
+type SpreadsheetMetadata = {
+  sheets?: Array<{
+    properties?: {
+      title?: string;
+    };
+  }>;
+};
+
 const getLatestSheetTabName = async (spreadsheetId: string, apiKey: string): Promise<string> => {
-  const params = new URLSearchParams({ key: apiKey });
+  const params = new URLSearchParams({
+    key: apiKey,
+    fields: "sheets.properties.title",
+  });
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?${params}`;
   
   const response = await fetch(url);
@@ -46,13 +57,22 @@ const getLatestSheetTabName = async (spreadsheetId: string, apiKey: string): Pro
     throw error;
   }
 
-  const payload = await response.json() as { sheets?: Array<{ properties?: { title?: string } }> };
-  const tabNames = payload.sheets?.map(s => s.properties?.title).filter((name): name is string => !!name) || [];
+  const payload = await response.json() as SpreadsheetMetadata;
+  const tabNames = payload.sheets
+    ?.map((sheet) => sheet.properties?.title?.trim())
+    .filter((name): name is string => Boolean(name)) || [];
 
-  if (tabNames.length === 0) return "Sheet1";
+  if (tabNames.length === 0) {
+    throw new Error("No sheet tabs were found in the Google Spreadsheet.");
+  }
   
   // اختيار التبويب الأخير (أحدث تاريخ فـ الجدول ديالك)
   return tabNames[tabNames.length - 1];
+};
+
+const toA1SheetRange = (sheetName: string, columns = "A:Z") => {
+  const escapedSheetName = sheetName.replace(/'/g, "''");
+  return `'${escapedSheetName}'!${columns}`;
 };
 
 const getSheetValues = async (spreadsheetId: string, apiKey: string, range: string) => {
@@ -191,8 +211,8 @@ async function startServer() {
 
     try {
       // 🔥 تحديث ديناميكي: كيجيب أحدث تبويب بوحدو
-      const dynamicRange = await getLatestSheetTabName(spreadsheetId, apiKey);
-      const rows = await getSheetValues(spreadsheetId, apiKey, dynamicRange);
+      const latestSheetName = await getLatestSheetTabName(spreadsheetId, apiKey);
+      const rows = await getSheetValues(spreadsheetId, apiKey, toA1SheetRange(latestSheetName));
       const columns = findSheetColumns(rows, cityColumn, columnName);
 
       if (!columns) {
@@ -255,8 +275,8 @@ async function startServer() {
         rows = await getPublicSheetValues(spreadsheetId, gid);
       } else {
         // 🔥 تحديث ديناميكي: كيجيب أحدث تاريخ أوتوماتيكياً فاش كتبرك على زر التزامن
-        const dynamicRange = await getLatestSheetTabName(spreadsheetId, apiKey || "");
-        rows = await getSheetValues(spreadsheetId, apiKey || "", dynamicRange);
+        const latestSheetName = await getLatestSheetTabName(spreadsheetId, apiKey || "");
+        rows = await getSheetValues(spreadsheetId, apiKey || "", toA1SheetRange(latestSheetName));
       }
 
       const columns = findSheetColumns(rows, cityColumn, percentageColumn, !requestedCity);
