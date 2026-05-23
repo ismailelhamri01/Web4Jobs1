@@ -128,10 +128,12 @@ const PHASE_STEPS: Record<string, string[]> = {
     "P3 - Web security Certification",
     "P3 - Network Security Certification",
     "P3 - Projet final",
-    "P4 - Fondamentaux No/Low code",
-    "P4 - Automatisation No/Low code",
-    "P4 - Applications No/Low code",
-    "P4 - Projet final"
+    "P4 - Concepts de Base du No/Low Code",
+    "P4 - Formation UI/UX Design",
+    "P4 - IT Low/No Code - Partie 1 : Développement Web",
+    "P4 - Module Gestion de données",
+    "P4 - Création d'une application mobile sans Code",
+    "P4 - Module Automation"
   ],
   "Phase 4 : Insertion et autonomisation": [
     "Orientation et choix du mode d’insertion",
@@ -239,10 +241,12 @@ const PHASE_3_PARCOURS: Record<string, string[]> = {
     "P3 - Projet final"
   ],
   "Formation No/Low code": [
-    "P4 - Fondamentaux No/Low code",
-    "P4 - Automatisation No/Low code",
-    "P4 - Applications No/Low code",
-    "P4 - Projet final"
+    "P4 - Concepts de Base du No/Low Code",
+    "P4 - Formation UI/UX Design",
+    "P4 - IT Low/No Code - Partie 1 : Développement Web",
+    "P4 - Module Gestion de données",
+    "P4 - Création d'une application mobile sans Code",
+    "P4 - Module Automation"
   ]
 };
 
