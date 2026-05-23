@@ -3,6 +3,16 @@ import "dotenv/config";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import * as XLSX from "xlsx";
+import { createSign } from "crypto";
+
+type SpreadsheetMetadata = {
+  sheets?: Array<{
+    properties?: {
+      sheetId?: number;
+      title?: string;
+    };
+  }>;
+};
 
 const normalizeHeader = (value: unknown) =>
   String(value ?? "")
@@ -103,6 +113,177 @@ const getPublicSheetValues = async (spreadsheetId: string, gid: string) => {
       return parseCsvRows(await fetchPublicCsv(gvizUrl));
     } catch {
       throw firstError;
+    }
+  }
+};
+
+const toA1SheetRange = (sheetName: string, columns = "A:Z") => {
+  const escapedSheetName = sheetName.replace(/'/g, "''");
+  return `'${escapedSheetName}'!${columns}`;
+};
+
+const getSheetNameByGid = async (spreadsheetId: string, gid: string, apiKey: string) => {
+  const params = new URLSearchParams({
+    key: apiKey,
+    fields: "sheets.properties(sheetId,title)",
+  });
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?${params}`;
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const error = new Error("Unable to fetch spreadsheet metadata.") as Error & { status?: number; code?: string };
+    error.status = response.status;
+    error.code = response.status === 403 ? "publicAccessRequired" : undefined;
+    throw error;
+  }
+
+  const metadata = await response.json() as SpreadsheetMetadata;
+  const sheets = metadata.sheets || [];
+  const requestedSheet = gid
+    ? sheets.find((sheet) => String(sheet.properties?.sheetId ?? "") === gid)
+    : sheets[0];
+  const title = requestedSheet?.properties?.title;
+
+  if (!title) {
+    const error = new Error("Unable to find the requested sheet tab.") as Error & { status?: number; code?: string };
+    error.status = 404;
+    error.code = "columnsMissing";
+    throw error;
+  }
+
+  return title;
+};
+
+const getApiKeySheetValuesByGid = async (spreadsheetId: string, gid: string, apiKey: string) => {
+  const sheetName = await getSheetNameByGid(spreadsheetId, gid, apiKey);
+  return getSheetValues(spreadsheetId, apiKey, toA1SheetRange(sheetName));
+};
+
+const base64UrlEncode = (value: string | Buffer) =>
+  Buffer.from(value)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+
+const getServiceAccountAccessToken = async () => {
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, "\n");
+
+  if (!clientEmail || !privateKey) return "";
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64UrlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claim = base64UrlEncode(JSON.stringify({
+    iss: clientEmail,
+    scope: "https://www.googleapis.com/auth/spreadsheets.readonly",
+    aud: "https://oauth2.googleapis.com/token",
+    exp: now + 3600,
+    iat: now,
+  }));
+  const unsignedToken = `${header}.${claim}`;
+  const signature = createSign("RSA-SHA256")
+    .update(unsignedToken)
+    .sign(privateKey);
+  const assertion = `${unsignedToken}.${base64UrlEncode(signature)}`;
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = new Error("Unable to authenticate Google service account.") as Error & { status?: number; code?: string };
+    error.status = response.status;
+    error.code = "publicAccessRequired";
+    throw error;
+  }
+
+  const payload = await response.json() as { access_token?: string };
+  return payload.access_token || "";
+};
+
+const getAuthorizedSheetNameByGid = async (spreadsheetId: string, gid: string, accessToken: string) => {
+  const params = new URLSearchParams({
+    fields: "sheets.properties(sheetId,title)",
+  });
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?${params}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!response.ok) {
+    const error = new Error("Unable to fetch spreadsheet metadata.") as Error & { status?: number; code?: string };
+    error.status = response.status;
+    error.code = response.status === 403 ? "publicAccessRequired" : undefined;
+    throw error;
+  }
+
+  const metadata = await response.json() as SpreadsheetMetadata;
+  const sheets = metadata.sheets || [];
+  const requestedSheet = gid
+    ? sheets.find((sheet) => String(sheet.properties?.sheetId ?? "") === gid)
+    : sheets[0];
+  const title = requestedSheet?.properties?.title;
+
+  if (!title) {
+    const error = new Error("Unable to find the requested sheet tab.") as Error & { status?: number; code?: string };
+    error.status = 404;
+    error.code = "columnsMissing";
+    throw error;
+  }
+
+  return title;
+};
+
+const getServiceAccountSheetValues = async (spreadsheetId: string, gid: string) => {
+  const accessToken = await getServiceAccountAccessToken();
+  if (!accessToken) {
+    const error = new Error("Google service account is not configured.") as Error & { status?: number; code?: string };
+    error.status = 403;
+    error.code = "publicAccessRequired";
+    throw error;
+  }
+
+  const sheetName = await getAuthorizedSheetNameByGid(spreadsheetId, gid, accessToken);
+  const params = new URLSearchParams({ majorDimension: "ROWS" });
+  const range = toA1SheetRange(sheetName);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?${params}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!response.ok) {
+    const error = new Error("Unable to read Google Sheets data.") as Error & { status?: number; code?: string };
+    error.status = response.status;
+    error.code = response.status === 403 ? "publicAccessRequired" : undefined;
+    throw error;
+  }
+
+  const payload = await response.json() as { values?: unknown[][] };
+  return payload.values || [];
+};
+
+const getSharedOrPrivateSheetValues = async (spreadsheetId: string, gid: string, apiKey?: string) => {
+  try {
+    return await getPublicSheetValues(spreadsheetId, gid);
+  } catch (publicError) {
+    if (apiKey) {
+      try {
+        return await getApiKeySheetValuesByGid(spreadsheetId, gid, apiKey);
+      } catch {
+        return getServiceAccountSheetValues(spreadsheetId, gid);
+      }
+    }
+
+    try {
+      return await getServiceAccountSheetValues(spreadsheetId, gid);
+    } catch {
+      throw publicError;
     }
   }
 };
@@ -227,7 +408,7 @@ async function startServer() {
 
     try {
       const rows = querySpreadsheetId
-        ? await getPublicSheetValues(spreadsheetId, gid)
+        ? await getSharedOrPrivateSheetValues(spreadsheetId, gid, apiKey)
         : await getSheetValues(spreadsheetId, apiKey || "", range);
       const columns = findSheetColumns(rows, cityColumn, percentageColumn, !requestedCity);
 
