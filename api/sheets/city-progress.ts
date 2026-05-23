@@ -1,5 +1,14 @@
 import * as XLSX from "xlsx";
 
+type SpreadsheetMetadata = {
+  sheets?: Array<{
+    properties?: {
+      sheetId?: number;
+      title?: string;
+    };
+  }>;
+};
+
 const normalizeHeader = (value: unknown) =>
   String(value ?? "")
     .trim()
@@ -77,6 +86,73 @@ const getPublicSheetValues = async (spreadsheetId: string, gid: string) => {
   }
 };
 
+const toA1SheetRange = (sheetName: string, columns = "A:Z") => {
+  const escapedSheetName = sheetName.replace(/'/g, "''");
+  return `'${escapedSheetName}'!${columns}`;
+};
+
+const getSheetNameByGid = async (spreadsheetId: string, gid: string, apiKey: string) => {
+  const params = new URLSearchParams({
+    key: apiKey,
+    fields: "sheets.properties(sheetId,title)",
+  });
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?${params}`;
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const error = new Error("Unable to fetch spreadsheet metadata.") as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+
+  const metadata = await response.json() as SpreadsheetMetadata;
+  const sheets = metadata.sheets || [];
+  const requestedSheet = gid
+    ? sheets.find((sheet) => String(sheet.properties?.sheetId ?? "") === gid)
+    : sheets[0];
+  const title = requestedSheet?.properties?.title;
+
+  if (!title) {
+    const error = new Error("Unable to find the requested sheet tab.") as Error & { status?: number; code?: string };
+    error.status = 404;
+    error.code = "columnsMissing";
+    throw error;
+  }
+
+  return title;
+};
+
+const getPrivateSheetValues = async (spreadsheetId: string, gid: string, apiKey: string) => {
+  const sheetName = await getSheetNameByGid(spreadsheetId, gid, apiKey);
+  const params = new URLSearchParams({
+    key: apiKey,
+    majorDimension: "ROWS",
+  });
+  const range = toA1SheetRange(sheetName);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?${params}`;
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const error = new Error("Unable to read Google Sheets data.") as Error & { status?: number; code?: string };
+    error.status = response.status;
+    error.code = response.status === 403 ? "publicAccessRequired" : undefined;
+    throw error;
+  }
+
+  const payload = await response.json() as { values?: unknown[][] };
+  return payload.values || [];
+};
+
+const getSheetValues = async (spreadsheetId: string, gid: string) => {
+  try {
+    return await getPublicSheetValues(spreadsheetId, gid);
+  } catch (publicError) {
+    const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
+    if (!apiKey) throw publicError;
+    return getPrivateSheetValues(spreadsheetId, gid, apiKey);
+  }
+};
+
 const findHeaderIndex = (headers: unknown[], names: string[]) => {
   const normalizedNames = names.map(normalizeHeader);
   return headers.findIndex((header) => normalizedNames.some((name) => normalizeHeader(header).includes(name)));
@@ -134,7 +210,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const rows = await getPublicSheetValues(spreadsheetId, gid);
+    const rows = await getSheetValues(spreadsheetId, gid);
     const columns = findSheetColumns(rows, cityColumn, percentageColumn, !requestedCity);
 
     if (!columns) {
