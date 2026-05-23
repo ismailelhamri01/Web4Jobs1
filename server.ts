@@ -32,49 +32,6 @@ const parsePercentageValue = (value: unknown): number | null => {
   return parsed;
 };
 
-// 🔥 دالة جديدة لجلب أسماء كل التبويبات (Tabs) واختيار أحدث واحد تلقائياً
-type SpreadsheetMetadata = {
-  sheets?: Array<{
-    properties?: {
-      title?: string;
-    };
-  }>;
-};
-
-const getLatestSheetTabName = async (spreadsheetId: string, apiKey: string): Promise<string> => {
-  const params = new URLSearchParams({
-    key: apiKey,
-    fields: "sheets.properties.title",
-  });
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?${params}`;
-  
-  const response = await fetch(url);
-  if (!response.ok) {
-    const detail = await response.text();
-    const error = new Error("Unable to fetch spreadsheet metadata.") as Error & { status?: number; detail?: string };
-    error.status = response.status;
-    error.detail = detail;
-    throw error;
-  }
-
-  const payload = await response.json() as SpreadsheetMetadata;
-  const tabNames = payload.sheets
-    ?.map((sheet) => sheet.properties?.title?.trim())
-    .filter((name): name is string => Boolean(name)) || [];
-
-  if (tabNames.length === 0) {
-    throw new Error("No sheet tabs were found in the Google Spreadsheet.");
-  }
-  
-  // اختيار التبويب الأخير (أحدث تاريخ فـ الجدول ديالك)
-  return tabNames[tabNames.length - 1];
-};
-
-const toA1SheetRange = (sheetName: string, columns = "A:Z") => {
-  const escapedSheetName = sheetName.replace(/'/g, "''");
-  return `'${escapedSheetName}'!${columns}`;
-};
-
 const getSheetValues = async (spreadsheetId: string, apiKey: string, range: string) => {
   const params = new URLSearchParams({
     key: apiKey,
@@ -197,6 +154,7 @@ async function startServer() {
   app.get("/api/sheets/certification-1-average", async (_req, res) => {
     const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
     const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
+    const range = process.env.GOOGLE_SHEETS_RANGE || "Sheet1";
     const cityColumn = process.env.GOOGLE_SHEETS_CITY_COLUMN || "Centre";
     const columnName = process.env.GOOGLE_SHEETS_PERCENTAGE_COLUMN
       || process.env.GOOGLE_SHEETS_CERTIFICATION_COLUMN
@@ -210,9 +168,7 @@ async function startServer() {
     }
 
     try {
-      // 🔥 تحديث ديناميكي: كيجيب أحدث تبويب بوحدو
-      const latestSheetName = await getLatestSheetTabName(spreadsheetId, apiKey);
-      const rows = await getSheetValues(spreadsheetId, apiKey, toA1SheetRange(latestSheetName));
+      const rows = await getSheetValues(spreadsheetId, apiKey, range);
       const columns = findSheetColumns(rows, cityColumn, columnName);
 
       if (!columns) {
@@ -248,6 +204,7 @@ async function startServer() {
     const spreadsheetId = querySpreadsheetId || process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
     const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
     const gid = getSingleQueryValue(req.query.gid);
+    const range = getSingleQueryValue(req.query.range) || process.env.GOOGLE_SHEETS_RANGE || "Sheet1";
     const cityColumn = getSingleQueryValue(req.query.cityColumn) || process.env.GOOGLE_SHEETS_CITY_COLUMN || "Centre";
     const requestedCity = getSingleQueryValue(req.query.city);
     const percentageColumn = getSingleQueryValue(req.query.percentageColumn) || process.env.GOOGLE_SHEETS_PERCENTAGE_COLUMN
@@ -269,16 +226,9 @@ async function startServer() {
     }
 
     try {
-      let rows: unknown[][] = [];
-      
-      if (querySpreadsheetId) {
-        rows = await getPublicSheetValues(spreadsheetId, gid);
-      } else {
-        // 🔥 تحديث ديناميكي: كيجيب أحدث تاريخ أوتوماتيكياً فاش كتبرك على زر التزامن
-        const latestSheetName = await getLatestSheetTabName(spreadsheetId, apiKey || "");
-        rows = await getSheetValues(spreadsheetId, apiKey || "", toA1SheetRange(latestSheetName));
-      }
-
+      const rows = querySpreadsheetId
+        ? await getPublicSheetValues(spreadsheetId, gid)
+        : await getSheetValues(spreadsheetId, apiKey || "", range);
       const columns = findSheetColumns(rows, cityColumn, percentageColumn, !requestedCity);
 
       if (!columns) {
@@ -347,13 +297,17 @@ async function startServer() {
       return res.status(400).json({ error: "Email and message are required" });
     }
 
+    // In a real production app, you would use Nodemailer or an email service here.
+    // For this demo, we'll simulate a successful send to i.eloutar@web4jobs.ma
     console.log(`Sending email to i.eloutar@web4jobs.ma from ${email}: ${message}`);
 
+    // Simulate network delay
     setTimeout(() => {
       res.json({ success: true, message: "Message envoyé avec succès" });
     }, 1000);
   });
 
+  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
