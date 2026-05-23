@@ -11,6 +11,9 @@
     ],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "types": [
+      "node"
+    ],
     "isolatedModules": true,
     "moduleDetection": "force",
     "allowJs": true,
